@@ -15,8 +15,8 @@ from app.services.google_api import (
 )
 
 
-SPREADSHEETS_UPDATE_VALUE_ERROR = (
-    'Произошла ошибка при наполнении таблицы данными: {error}'
+GOOGLE_ENDPOINT_ERROR = (
+    'Произошла ошибка при работе с Google API: {error}'
 )
 
 router = APIRouter()
@@ -45,9 +45,9 @@ async def get_report(
             projects,
             wrapper_services
         )
-    except Exception as error:
+    except ValueError as error:
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
-            detail=SPREADSHEETS_UPDATE_VALUE_ERROR.format(error=error),
+            detail=GOOGLE_ENDPOINT_ERROR.format(error=error),
         )
     return url

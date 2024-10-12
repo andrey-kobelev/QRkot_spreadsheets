@@ -1,9 +1,8 @@
 import copy
 from datetime import datetime
-from http import HTTPStatus
 
 from aiogoogle import Aiogoogle
-from fastapi import HTTPException
+from aiogoogle.excs import AiogoogleError
 
 from app.core.config import settings
 from app.models import CharityProject
@@ -13,10 +12,10 @@ FORMAT = '%Y/%m/%d %H:%M:%S'
 ROW_COUNT = 100
 COL_COUNT = 11
 SHEET_ID = 0
-PROPERTIES_TITLE = 'QRKot_отчёт_на_{now_date_time}'
+PROPERTIES_TITLE = f'QRKot_отчёт_на_{datetime.now().strftime(FORMAT)}'
 SHEETS_TITLE = 'Лист1'
 TABLE_HEAD = [
-    ['Отчёт от', 'now_date_time']
+    ['Отчёт от', str(datetime.now().strftime(FORMAT))]
 ]
 TABLE_DESCRIPTION = [
     ['Топ проектов по скорости закрытия'],
@@ -40,30 +39,25 @@ SPREADSHEET_BODY = {
         }
     }]
 }
-ROW_COUNT_ERROR = (
-    'В таблице не хватает строк, чтобы записать все данные.'
+SPREADSHEET_UPDATE_ERROR = (
+    'Ошибка при заполнении таблицы данными: {error}'
 )
 
 
 async def spreadsheets_create(
         wrapper_services: Aiogoogle,
-        spreadsheet_body: dict = copy.deepcopy(SPREADSHEET_BODY)
+        spreadsheet_body: dict = SPREADSHEET_BODY
 ) -> tuple[str, str]:
-    now_date_time = datetime.now().strftime(FORMAT)
+    spreadsheet_body = copy.deepcopy(spreadsheet_body)
     service = await wrapper_services.discover('sheets', 'v4')
-    spreadsheet_body['properties']['title'] = PROPERTIES_TITLE.format(
-        now_date_time=now_date_time
-    )
     response = await wrapper_services.as_service_account(
         service.spreadsheets.create(json=spreadsheet_body)
     )
-    spreadsheet_id = response['spreadsheetId']
-    url = 'https://docs.google.com/spreadsheets/d/' + spreadsheet_id
-    return spreadsheet_id, url
+    return response['spreadsheetId'], response['spreadsheetUrl']
 
 
 async def set_user_permissions(
-        spreadsheetid: str,
+        spreadsheet_id: str,
         wrapper_services: Aiogoogle
 ) -> None:
     permissions_body = {
@@ -74,7 +68,7 @@ async def set_user_permissions(
     service = await wrapper_services.discover('drive', 'v3')
     await wrapper_services.as_service_account(
         service.permissions.create(
-            fileId=spreadsheetid,
+            fileId=spreadsheet_id,
             json=permissions_body,
             fields="id"
         ))
@@ -84,11 +78,10 @@ async def spreadsheets_update_value(
         spreadsheet_id: str,
         projects: list[CharityProject],
         wrapper_services: Aiogoogle,
-        table_head: list[list] = copy.deepcopy(TABLE_HEAD)
+        table_head: list[list] = TABLE_HEAD
 ) -> None:
-    now_date_time = datetime.now().strftime(FORMAT)
+    table_head = copy.deepcopy(table_head)
     service = await wrapper_services.discover('sheets', 'v4')
-    table_head[0][1] = str(now_date_time)
     update_body = {
         'majorDimension': 'ROWS',
         'values': [
@@ -101,16 +94,20 @@ async def spreadsheets_update_value(
             ])) for project in projects]
         ]
     }
-    if len(update_body['values']) > ROW_COUNT:
-        raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST,
-            detail=ROW_COUNT_ERROR,
+    current_col_count = max([
+        len(item) for item in update_body['values']
+    ])
+    current_row_count = len(update_body['values'])
+    try:
+        await wrapper_services.as_service_account(
+            service.spreadsheets.values.update(
+                spreadsheetId=spreadsheet_id,
+                range=f'R1C1:R{current_row_count}C{current_col_count}',
+                valueInputOption='USER_ENTERED',
+                json=update_body
+            )
         )
-    await wrapper_services.as_service_account(
-        service.spreadsheets.values.update(
-            spreadsheetId=spreadsheet_id,
-            range=f'R1C1:R{ROW_COUNT}C{COL_COUNT}',
-            valueInputOption='USER_ENTERED',
-            json=update_body
+    except AiogoogleError as error:
+        raise ValueError(
+            SPREADSHEET_UPDATE_ERROR.format(error=error)
         )
-    )
