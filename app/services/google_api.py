@@ -40,7 +40,8 @@ SPREADSHEET_BODY = {
 }
 SPREADSHEET_UPDATE_ERROR = (
     'Объем записываемых данных в таблицу '
-    'не соответствует размеру таблицы: {detail}'
+    'не соответствует размеру таблицы '
+    f'{ROW_COUNT=} {COL_COUNT=}: {{detail}}'
 )
 
 
@@ -105,8 +106,7 @@ async def spreadsheets_update_value(
         current_col_count > COL_COUNT
     ):
         raise ValueError(SPREADSHEET_UPDATE_ERROR.format(detail=(
-            f'{current_col_count=} {COL_COUNT=}; '
-            f'{current_row_count=} {ROW_COUNT=}'
+            f'{current_col_count=} {current_row_count=}'
         )))
     await wrapper_services.as_service_account(
         service.spreadsheets.values.update(
